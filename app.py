@@ -76,7 +76,7 @@ if matcher is None:
     st.stop()
 
 if page == "Live Search":
-    st.title("Instant Product Retrieval")
+    st.title("Consumer Product Recognizer")
     uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png"])
     
     if uploaded_file:
