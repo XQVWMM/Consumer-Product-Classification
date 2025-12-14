@@ -87,25 +87,75 @@ if page == "Live Search":
         
         col1, col2 = st.columns(2)
         with col1:
-            st.image(cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB), caption="Query", width=300)
+            st.image(cv2.cvtColor(query_img, cv2.COLOR_BGR2RGB), caption="Query Image", width=300)
             
         with col2:
             if results:
                 best_name, score = results[0]
                 match_path = os.path.join(DATASET_PATH, best_name)
-                st.success(f"**Best Match:** {best_name}")
+                
+                st.success(f"Best Match: {best_name}")
                 st.metric("Inference Time", f"{t_infer:.4f} s")
+                
                 if os.path.exists(match_path):
-                    st.image(match_path, width=300)
+                    st.image(match_path, caption=f"Score: {score} matches", width=300)
+                else:
+                    st.warning("Matched file not found in dataset folder.")
             else:
                 st.warning("No match found.")
 
+        if results and os.path.exists(os.path.join(DATASET_PATH, results[0][0])):
+            st.divider()
+            st.subheader("Feature Matching Details")
+            
+            with st.spinner("Generating feature visualization..."):
+                best_filename = results[0][0]
+                db_img = cv2.imread(os.path.join(DATASET_PATH, best_filename))
+                
+                h, w = query_img.shape[:2]
+                max_dim = 320
+                if w > max_dim or h > max_dim:
+                    scale = max_dim / max(w, h)
+                    viz_query = cv2.resize(query_img, None, fx=scale, fy=scale)
+                else:
+                    viz_query = query_img.copy()
+                
+                h_q, w_q = viz_query.shape[:2]
+                h_db, w_db = db_img.shape[:2]
+                scale_db = h_q / h_db
+                viz_db = cv2.resize(db_img, None, fx=scale_db, fy=scale_db)
+
+                akaze = cv2.AKAZE_create(threshold=0.005)
+                
+                kp_q, des_q = akaze.detectAndCompute(cv2.cvtColor(viz_query, cv2.COLOR_BGR2GRAY), None)
+                kp_db, des_db = akaze.detectAndCompute(cv2.cvtColor(viz_db, cv2.COLOR_BGR2GRAY), None)
+                
+                if des_q is not None and des_db is not None:
+                    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+                    matches = bf.knnMatch(des_q, des_db, k=2)
+                    
+                    good_matches = []
+                    for m, n in matches:
+                        if m.distance < 0.75 * n.distance:
+                            good_matches.append(m)
+                    
+                    img_matches = cv2.drawMatches(
+                        viz_query, kp_q, 
+                        viz_db, kp_db, 
+                        good_matches, None, 
+                        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
+                    )
+                    
+                    st.image(cv2.cvtColor(img_matches, cv2.COLOR_BGR2RGB), 
+                             caption=f"Visualized {len(good_matches)} Strong Keypoint Connections", 
+                             use_container_width=True)
+
 elif page == "System Evaluation":
     st.title("Evaluation & Metrics")
-    st.markdown(f"Running benchmark on `{TEST_FOLDER}`")
-    st.caption(f"Note: Each image is processed **{ITERATIONS_PER_IMAGE} times** to calculate its unique standard deviation.")
+    st.markdown(f"Running benchmark on {TEST_FOLDER} (First 20 Images)")
+    st.caption(f"Note: Each image is processed {ITERATIONS_PER_IMAGE} times to calculate its unique standard deviation.")
     
-    if st.button("▶ Run Benchmark"):
+    if st.button("Run Benchmark"):
         if not os.path.exists(TEST_FOLDER):
             st.error("Test folder not found.")
             st.stop()
@@ -115,7 +165,6 @@ elif page == "System Evaluation":
         
         means_per_query = []
         stds_per_query = []
-        
         progress_bar = st.progress(0)
         
         for i, f in enumerate(target_files):
@@ -130,7 +179,6 @@ elif page == "System Evaluation":
             
             means_per_query.append(np.mean(latencies))
             stds_per_query.append(np.std(latencies))
-            
             progress_bar.progress((i + 1) / len(target_files))
             
         overall_avg_time = np.mean(means_per_query)
@@ -146,11 +194,9 @@ Avg F1-Score@5:  0.2833
 """
         st.divider()
         col1, col2 = st.columns(2)
-        
         with col1:
             st.subheader("Metrics Report")
             st.code(report_text, language="text")
-            
         with col2:
             st.subheader("Real-Time Stats")
             st.metric("Avg Latency", f"{overall_avg_time:.4f} s")
@@ -162,13 +208,12 @@ Avg F1-Score@5:  0.2833
         
         ax.errorbar(indices, means_per_query, yerr=stds_per_query, fmt='o', color='#2c3e50', 
                     ecolor='#e74c3c', elinewidth=1.5, capsize=4, 
-                    label='Mean Time ± Std Dev')
+                    label='Mean Time +/- Std Dev')
         
         ax.plot(indices, means_per_query, linestyle='-', color='#2c3e50', alpha=0.3)
         ax.axhline(y=overall_avg_time, color='#2c3e50', linestyle='--', label=f'Overall Mean ({overall_avg_time:.4f}s)')
         
-        ax.set_xticks(indices)  
-
+        ax.set_xticks(indices)
         ax.set_xlabel('Query Index')
         ax.set_ylabel('Time (s)')
         ax.legend()
